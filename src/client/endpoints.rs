@@ -139,6 +139,13 @@ impl D2LClient {
                 let re = regex::Regex::new(r#"filename[*]?=(?:UTF-8'')?"?([^";]+)"?"#).ok()?;
                 re.captures(cd_str).and_then(|cap| cap.get(1).map(|m| m.as_str().to_string()))
             })
+            .or_else(|| {
+                url.split('?')
+                    .next()
+                    .and_then(|u| u.rsplit('/').next())
+                    .map(|s| s.replace("%20", " "))
+            })
+            .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "downloaded_content.bin".to_string());
 
         let target_file = if destination.is_dir() {

@@ -58,6 +58,9 @@ async fn main() -> anyhow::Result<()> {
         Commands::Assignments { course } => {
             cli::handlers::handle_assignments(&client, &config, course, args.json).await?;
         }
+        Commands::Content { course } => {
+            cli::handlers::handle_content(&client, &config, course, args.json).await?;
+        }
         Commands::Download { course, kind, dest } => {
             cli::handlers::handle_download(&client, &config, course, kind, dest, args.json).await?;
         }

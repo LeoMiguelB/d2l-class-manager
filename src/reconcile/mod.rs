@@ -28,6 +28,22 @@ pub fn matches_item_title(folder_name: &str, item: &DeadlineItem) -> bool {
         }
     }
 
+    // 2b. Specific discriminator check (proposal vs draft vs peer vs final vs critique)
+    let fn_has = |word: &str| fn_norm.contains(word);
+    let it_has = |word: &str| it_norm.contains(word) || id_norm.contains(word);
+    
+    let fn_is_crit = fn_has("critique") || fn_has("critical");
+    let it_is_crit = it_has("critique") || it_has("critical");
+    if fn_is_crit != it_is_crit && (fn_is_crit || it_is_crit) {
+        return false;
+    }
+
+    for disc in &["proposal", "draft", "peer", "final"] {
+        if fn_has(disc) != it_has(disc) && (fn_has(disc) || it_has(disc)) {
+            return false;
+        }
+    }
+
     // 3. Digits check: if both contain digits, digits MUST match!
     let fn_digits: String = fn_norm.chars().filter(|c| c.is_ascii_digit()).collect();
     let it_digits: String = it_norm.chars().filter(|c| c.is_ascii_digit()).collect();
@@ -43,7 +59,8 @@ pub fn matches_item_title(folder_name: &str, item: &DeadlineItem) -> bool {
     // 5. Tokenized word overlap (ignoring punctuation and non-category stop words)
     let stop_words: HashSet<&str> = [
         "due", "the", "for", "in", "to", "and", "dropbox", "submission",
-        "deliverable", "folder", "drop", "box"
+        "deliverable", "folder", "drop", "box", "major",
+        "exercise", "part", "dssj"
     ]
     .into_iter()
     .collect();

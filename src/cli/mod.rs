@@ -59,6 +59,12 @@ pub enum Commands {
         course: Option<String>,
     },
 
+    #[command(about = "Fetch course content modules, lecture readings, and syllabus materials")]
+    Content {
+        #[arg(short, long, help = "Course code or OrgUnit ID")]
+        course: Option<String>,
+    },
+
     #[command(about = "Download lecture slides, course outlines, or assignment attachments")]
     Download {
         #[arg(short, long, required = true, help = "Course code or OrgUnit ID")]

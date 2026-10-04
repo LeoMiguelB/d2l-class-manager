@@ -20,25 +20,36 @@ pub async fn resolve_target_org_ids(
 
     if let Some(query) = course_query {
         let q = query.trim();
-        // 1. Direct numeric ID
+        // 1. Direct numeric ID (must match an actual enrollment ID or be a large OrgUnit ID >= 100,000)
         if let Ok(id) = q.parse::<i64>() {
-            return Ok(vec![(q.to_string(), id)]);
+            if enrollments.iter().any(|e| e.org_unit.id == id) || id >= 100_000 {
+                return Ok(vec![(q.to_string(), id)]);
+            }
         }
 
-        // 2. Vault mappings (exact or asterisk-stripped)
-        let q_clean = q.replace('*', "").to_uppercase();
+        // 2. Vault mappings (exact or delimiter-stripped or substring)
+        let q_clean = q.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
         if let Some(m) = mappings.iter().find(|m| {
+            let m_clean = m.course_code.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
             m.course_code.eq_ignore_ascii_case(q)
-                || m.course_code.replace('*', "").to_uppercase() == q_clean
+                || m_clean == q_clean
+                || m_clean.contains(&q_clean)
         }) {
             return Ok(vec![(m.course_code.clone(), m.org_unit_id)]);
         }
 
-        // 3. Search enrollments (code or name)
+        // 3. Search enrollments (code or name) - prioritize Course Offering (Type 3)
         if let Some(enr) = enrollments.iter().find(|e| {
-            let code = e.org_unit.code.as_deref().unwrap_or("").replace('*', "").to_uppercase();
-            let name = e.org_unit.name.to_uppercase();
-            code.contains(&q_clean) || name.contains(&q_clean)
+            let is_offering = e.org_unit.unit_type.id == 3;
+            let code = e.org_unit.code.as_deref().unwrap_or("").replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+            let name = e.org_unit.name.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+            is_offering && (code.contains(&q_clean) || name.contains(&q_clean))
+        }).or_else(|| {
+            enrollments.iter().find(|e| {
+                let code = e.org_unit.code.as_deref().unwrap_or("").replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                let name = e.org_unit.name.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                code.contains(&q_clean) || name.contains(&q_clean)
+            })
         }) {
             let label = enr.org_unit.code.clone().unwrap_or_else(|| enr.org_unit.name.clone());
             return Ok(vec![(label, enr.org_unit.id)]);
@@ -202,6 +213,45 @@ pub async fn handle_assignments(
             ]);
         }
         println!("{table}");
+    }
+    Ok(())
+}
+
+pub async fn handle_content(
+    client: &D2LClient,
+    config: &AppConfig,
+    course: Option<String>,
+    json_mode: bool,
+) -> Result<()> {
+    let targets = resolve_target_org_ids(client, config, course.as_deref()).await?;
+    let mut all_tocs = Vec::new();
+
+    for (code, org_id) in targets {
+        if let Ok(toc) = client.content_toc(org_id).await {
+            all_tocs.push((code, org_id, toc));
+        }
+    }
+
+    if json_mode {
+        println!("{}", serde_json::to_string_pretty(&all_tocs)?);
+    } else {
+        for (code, org_id, toc) in all_tocs {
+            println!("📚 Content for {} (OrgUnit {}):", code, org_id);
+            for m in toc.modules {
+                println!("  📁 {}", m.title);
+                if let Some(ref d) = m.description {
+                    if let Some(ref txt) = d.text {
+                        let preview: String = txt.lines().take(3).collect::<Vec<_>>().join(" ");
+                        if !preview.trim().is_empty() {
+                            println!("     📝 {}", preview.trim());
+                        }
+                    }
+                }
+                for t in m.topics {
+                    println!("    📄 {} ({})", t.title, t.url.unwrap_or_default());
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -448,10 +498,15 @@ pub async fn handle_download(
         .ok_or_else(|| anyhow::anyhow!("Could not resolve course '{}'", course))?;
 
     let target_dir = dest.unwrap_or_else(|| {
+        let sub = match kind.to_lowercase().as_str() {
+            "assignments" => "Assignments",
+            "syllabus" => "Syllabus",
+            _ => "Materials",
+        };
         config
             .vault_path
             .join(code.replace('*', ""))
-            .join("Materials")
+            .join(sub)
     });
 
     println!(
@@ -462,19 +517,60 @@ pub async fn handle_download(
     let toc = client.content_toc(*org_id).await?;
     let mut downloaded_count = 0;
 
-    fn collect_topics(modules: &[crate::models::d2l::ContentModule], acc: &mut Vec<crate::models::d2l::ContentTopic>) {
+    fn collect_topics(
+        modules: &[crate::models::d2l::ContentModule],
+        acc: &mut Vec<crate::models::d2l::ContentTopic>,
+        filter_kind: &str,
+    ) {
         for m in modules {
-            acc.extend(m.topics.clone());
-            collect_topics(&m.modules, acc);
+            let m_lower = m.title.to_lowercase();
+            let module_matches = match filter_kind {
+                "assignments" => m_lower.contains("assign"),
+                "syllabus" => m_lower.contains("syllabus") || m_lower.contains("outline"),
+                _ => true,
+            };
+
+            for t in &m.topics {
+                let t_lower = t.title.to_lowercase();
+                let topic_matches = match filter_kind {
+                    "assignments" => {
+                        module_matches
+                            || t_lower.contains("assign")
+                            || t_lower.contains("a1")
+                            || t_lower.contains("a2")
+                            || t_lower.contains("a3")
+                            || t_lower.contains("a4")
+                    }
+                    "syllabus" => {
+                        module_matches || t_lower.contains("syllabus") || t_lower.contains("outline")
+                    }
+                    _ => true,
+                };
+                if topic_matches {
+                    acc.push(t.clone());
+                }
+            }
+            collect_topics(&m.modules, acc, filter_kind);
         }
     }
 
     let mut topics = Vec::new();
-    collect_topics(&toc.modules, &mut topics);
+    collect_topics(&toc.modules, &mut topics, &kind.to_lowercase());
 
     for t in topics {
         if let Some(ref url) = t.url {
-            if url.ends_with(".pdf") || url.ends_with(".docx") || url.ends_with(".zip") {
+            let lower = url.to_lowercase();
+            if lower.ends_with(".pdf")
+                || lower.ends_with(".docx")
+                || lower.ends_with(".zip")
+                || lower.ends_with(".ipynb")
+                || lower.ends_with(".py")
+                || lower.ends_with(".c")
+                || lower.ends_with(".cpp")
+                || lower.ends_with(".java")
+                || lower.ends_with(".tar.gz")
+                || lower.ends_with(".csv")
+            {
                 let full_url = if url.starts_with("http") {
                     url.clone()
                 } else {

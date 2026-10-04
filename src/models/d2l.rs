@@ -145,6 +145,8 @@ pub struct ContentModule {
     pub module_id: i64,
     pub title: String,
     #[serde(default)]
+    pub description: Option<RichText>,
+    #[serde(default)]
     pub modules: Vec<ContentModule>,
     #[serde(default)]
     pub topics: Vec<ContentTopic>,

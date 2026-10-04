@@ -33,13 +33,30 @@ pub fn resolve_course_mappings(vault_path: &Path, enrollments: &[MyEnrollment]) 
 
             // Fallback fuzzy match against enrollments if link was missing
             if org_id.is_none() {
-                let clean_code = course.course_code.replace('*', "").to_uppercase();
+                let clean_code = course.course_code.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                // 1. Prefer Course Offering (Type Id 3)
                 for enr in enrollments {
-                    let enr_code = enr.org_unit.code.as_deref().unwrap_or("").replace('*', "").to_uppercase();
-                    let enr_name = enr.org_unit.name.to_uppercase();
+                    let is_offering = enr.org_unit.unit_type.id == 3;
+                    if !is_offering {
+                        continue;
+                    }
+                    let enr_code = enr.org_unit.code.as_deref().unwrap_or("").replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                    let enr_name = enr.org_unit.name.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
                     if enr_code.contains(&clean_code) || enr_name.contains(&clean_code) {
                         org_id = Some(enr.org_unit.id);
                         break;
+                    }
+                }
+
+                // 2. Fallback to any enrollment type
+                if org_id.is_none() {
+                    for enr in enrollments {
+                        let enr_code = enr.org_unit.code.as_deref().unwrap_or("").replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                        let enr_name = enr.org_unit.name.replace(['*', '_', ' ', '-', '.'], "").to_uppercase();
+                        if enr_code.contains(&clean_code) || enr_name.contains(&clean_code) {
+                            org_id = Some(enr.org_unit.id);
+                            break;
+                        }
                     }
                 }
             }
