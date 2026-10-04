@@ -2,7 +2,7 @@ pub mod endpoints;
 
 use crate::auth::StoredToken;
 use anyhow::{Context, Result};
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, ORIGIN, REFERER, USER_AGENT};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, COOKIE, ORIGIN, REFERER, USER_AGENT};
 use reqwest::{Client, Response, StatusCode};
 use std::time::Duration;
 
@@ -16,12 +16,22 @@ pub struct D2LClient {
 impl D2LClient {
     pub fn new(host: &str, token: StoredToken) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_str(&format!("Bearer {}", token.access_token))?,
-        );
+
+        if let Some(ref cookies) = token.cookies {
+            if !cookies.trim().is_empty() {
+                headers.insert(COOKIE, HeaderValue::from_str(cookies.trim())?);
+            }
+        }
+
+        if !token.access_token.trim().is_empty() {
+            headers.insert(
+                AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", token.access_token.trim()))?,
+            );
+        }
+
         headers.insert(ORIGIN, HeaderValue::from_str(&format!("https://{}", host))?);
-        headers.insert(REFERER, HeaderValue::from_str(&format!("https://{}/", host))?);
+        headers.insert(REFERER, HeaderValue::from_str(&format!("https://{}/d2l/home", host))?);
         headers.insert(
             USER_AGENT,
             HeaderValue::from_static("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"),

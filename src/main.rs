@@ -28,7 +28,7 @@ async fn main() -> anyhow::Result<()> {
 
         println!("Authenticating with D2L Brightspace ({host})...", host = config.host);
         let token = auth::resolve_token(&config, force, headless).await?;
-        println!("✅ Authentication successful! Logged in as: {:?}", token.sub);
+        println!("✅ Authentication successful! Logged in as: {}", token.sub.as_deref().unwrap_or("authenticated user"));
         return Ok(());
     }
 

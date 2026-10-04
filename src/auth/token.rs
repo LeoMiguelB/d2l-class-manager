@@ -7,7 +7,10 @@ use std::path::Path;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredToken {
     pub host: String,
+    #[serde(default)]
     pub access_token: String,
+    #[serde(default)]
+    pub cookies: Option<String>,
     pub expires_at: i64,
     pub sub: Option<String>,
     pub tenant_id: Option<String>,
@@ -72,11 +75,27 @@ impl StoredToken {
         Ok(Self {
             host: host.to_string(),
             access_token: clean_jwt.to_string(),
+            cookies: None,
             expires_at,
             sub,
             tenant_id,
             captured_at: Utc::now(),
         })
+    }
+
+    pub fn from_cookies(host: &str, cookies: &str, username: Option<&str>) -> Self {
+        let now = Utc::now();
+        // Session cookies typically remain valid for 2 hours
+        let expires_at = now.timestamp() + 2 * 3600;
+        Self {
+            host: host.to_string(),
+            access_token: String::new(),
+            cookies: Some(cookies.to_string()),
+            expires_at,
+            sub: username.map(|s| s.to_string()),
+            tenant_id: None,
+            captured_at: now,
+        }
     }
 }
 
